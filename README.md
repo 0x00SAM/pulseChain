@@ -3,6 +3,9 @@
 This repository collects projects that support exploration and foundational
 tooling for the PulseChain chain. PumpTires is the first project in the workspace.
 
+See the [PulseChain knowledge base](PULSECHAIN_KNOWLEDGE.md) for network facts,
+integration details, and known discrepancies in the current materials.
+
 ## Projects
 
 ### PumpTires (`pumptires/`)
