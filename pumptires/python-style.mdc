@@ -1,0 +1,119 @@
+---
+trigger: always_on
+---
+
+# Python Code Style Rules (PumpTires Monitor)
+
+This guide governs the Python implementation of the PulseChain PumpTires pending token creation monitor. It reconciles existing conventions with the requirements of a high-uptime, low-latency mempool listener that decodes and forecasts token launches.
+
+## Project Baseline
+
+- **Python version**: 3.11+
+- **Formatter/Linters**: Black (line-length 88), isort (profile "black"), mypy (strictness tuned below)
+- **Async runtime**: asyncio + uvloop
+- **Key libraries**: web3>=7 (AsyncWeb3), aiohttp, aiofiles, pydantic, pydantic-settings, orjson, fastapi (optional), tenacity (retry backoff)
+- **Packaging**: Poetry-managed `pyproject.toml` for reproducible installs
+
+## Formatting & Imports
+
+- Use Black with line length 88 and double quotes.
+- Use isort with profile "black"; groups: standard lib, third-party, local.
+- Avoid relative imports in application code; prefer absolute module paths.
+
+Example import ordering:
+```python
+# Standard library
+import asyncio
+import logging
+from pathlib import Path
+
+# Third-party
+import aiohttp
+from tenacity import retry
+from web3 import AsyncWeb3
+from web3.providers.async_websocket import AsyncWebsocketProvider
+
+# Local
+from app.config.settings import Settings
+from app.listeners.mempool import PendingMempoolListener
+```
+
+## Typing & Interfaces
+
+- Type-hint all public functions and methods; use `|` unions (PEP 604).
+- Prefer precise types over `Any`. Use `TypedDict`/`Protocol` for structured dicts.
+- Datamodels for I/O boundaries should be Pydantic models with `model_config = {"populate_by_name": True}`.
+
+## Docstrings
+
+- Use Google-style docstrings for all public functions/classes.
+- Document parameters, returns, and exceptions.
+
+## Logging
+
+- Use `get_logger(__name__)` with structured JSON logs (prefer orjson).
+- Levels: DEBUG for dev diagnostics, INFO for lifecycle/events, WARNING for retries/reconnects, ERROR for failures that require operator action.
+- Include mempool context (tx hash, sender, gas price in Beats, decoded token attributes, predicted token address) as `extra` fields.
+
+## Error Handling
+
+- Guard all external I/O (RPC, HTTP, file I/O) with try/except.
+- Use bounded retries with jitter for transient failures (PulseChain WSS reconnect, ABI fetch).
+- Wrap reconnection and nonce retrieval with `tenacity` policies to enforce exponential backoff and max attempts.
+- Never swallow exceptions silently; either re-raise or convert with context.
+
+```python
+try:
+    tx = await listener.fetch_transaction(tx_hash)
+except Exception:
+    logger.exception("pending_tx_lookup_failed", extra={"tx_hash": tx_hash})
+    raise
+```
+
+## Async & Networking
+
+- Set `uvloop.EventLoopPolicy()` at startup.
+- Use `AsyncWeb3` with `AsyncWebsocketProvider` for PulseChain `eth_subscribe` to pending transactions (`newPendingTransactions`).
+- Fan out tx-hash handling via `asyncio.TaskGroup` or `asyncio.create_task`, but cap concurrency to avoid RPC rate limits.
+- Share a single `aiohttp.ClientSession` per process; configure low default timeouts and heartbeat pings on the WebSocket connection.
+- Use graceful shutdown: cancel tasks, close sessions/providers, flush file buffers.
+
+## Security
+
+- Never hardcode secrets. Load from environment via Pydantic Settings.
+- Keep RPC endpoints, private keys (if any), and alerting webhooks in `.env` / secret stores (e.g., `PULSECHAIN_WSS_URL`).
+- Do not log secrets or bearer tokens.
+- Validate and sanitize all external inputs (RPC responses, decoded ABI fields) before use/logging.
+
+Sample `.env` (do not commit real keys):
+```env
+PULSECHAIN_WSS_URL=wss://pulsechain-rpc.publicnode.com
+FACTORY_ADDRESS=0x6538A83a81d855B965983161AF6a83e616D16fD5
+EVENT_LOG_PATH=data/pending_create_token.jsonl
+```
+
+## Code Quality
+
+- Black + isort formatting CI gate must pass.
+- mypy: enable useful checks but avoid over-strictness that impedes async/web3 patterns.
+- Keep modules focused: decode helpers separate from networking, prediction, and FastAPI presentation layers.
+
+Mypy baseline:
+- `python_version = "3.11"`
+- `ignore_missing_imports = true`
+- `warn_redundant_casts = true`, `warn_unused_ignores = true`
+- `no_incremental = true`, `cache_dir = "/dev/null"`
+
+## Testing
+
+- Use `pytest` and `pytest-asyncio` for async tests.
+- Mock network calls (Warpcast, Web3) and write fixture samples for TokenCreated logs.
+
+## Domain-Specific Notes (PumpTires)
+
+1. Target PulseChain mainnet factory contract: `0x6538A83a81d855B965983161AF6a83e616D16fD5`.
+2. Monitor pending transactions via `newPendingTransactions` and filter for calldata prefixed with selector `0x2f2f2d56` (`createToken(string,string)`).
+3. Decode token `name` and `symbol` using the PumpTires factory ABI; fall back to hex data logging if decoding fails.
+4. Predict the deployed token address using `keccak(rlp.encode([factory_address, nonce]))[-20:]`, where nonce = `web3.eth.get_transaction_count(factory_address, 'pending')` + pending tx offset.
+5. Capture gas price in Beats and provide derived PLS metrics for alerting.
+6. Write structured telemetry to JSONL and/or FastAPI endpoints for downstream automation.

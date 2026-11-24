@@ -1,0 +1,2 @@
+"""PumpTires contract ABIs."""
+

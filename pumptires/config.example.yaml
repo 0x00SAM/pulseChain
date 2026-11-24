@@ -1,0 +1,111 @@
+# PumpTires Monitor - Application Configuration Example
+# Copy this file to config.yaml and customize as needed
+#
+# This file contains non-secret configuration parameters
+# Secrets (private keys) and deployment-specific settings (URLs, addresses) belong in .env
+#
+# All values shown here are the defaults used when this file is missing
+
+# ==============================================================================
+# Logging Configuration
+# ==============================================================================
+logging:
+  level: INFO # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  event_log_path: data/pending_create_token.jsonl
+
+# ==============================================================================
+# Performance & Concurrency
+# ==============================================================================
+performance:
+  max_concurrent_tx_fetches: 50 # Higher = more throughput but more memory/network
+  websocket_ping_interval: 20 # seconds - WebSocket keepalive
+  websocket_ping_timeout: 10 # seconds - WebSocket ping timeout
+  disconnect_timeout: 10 # seconds - graceful provider disconnect timeout
+  subscription_timeout: 300 # seconds - subscription operation timeout
+
+# ==============================================================================
+# Retry Configuration
+# ==============================================================================
+retry:
+  max_attempts: 5 # Maximum retry attempts for failed operations
+  min_wait: 1.0 # seconds - minimum backoff delay
+  max_wait: 300.0 # seconds - maximum backoff delay (exponential cap)
+
+# ==============================================================================
+# Deduplication & Persistence
+# ==============================================================================
+dedup:
+  max_size: 10000 # Maximum entries in dedup stores (pending_tx and buy_dedup)
+
+# ==============================================================================
+# Metrics & Monitoring
+# ==============================================================================
+metrics:
+  log_interval_seconds: 300.0 # How often to log metrics summaries (5 minutes)
+
+# ==============================================================================
+# Cleanup Manager
+# ==============================================================================
+cleanup:
+  interval_seconds: 300.0 # How often to run cleanup (5 minutes)
+  max_age_seconds: 3600.0 # Maximum age for stale entries (1 hour)
+
+# ==============================================================================
+# Trading Configuration
+# ==============================================================================
+# ⚠️  WARNING: Trading is disabled by default for safety
+# Set enabled: true only when ready to execute live trades
+trading:
+  enabled: false # Master switch - must be true to trade
+  buy_amount_pls: 1 # Amount of PLS to spend per buy (1 PLS default)
+  slippage_bps: 500 # Slippage tolerance (500 = 5%)
+  fast_path: false # Skip quote for minimum latency (higher slippage risk)
+  approve_on_buy: true # Submit optimistic approve after buy for faster sells
+  sell_delay_seconds: 120 # Time to wait before selling after buy (seconds) - 2 minutes
+
+  # Buy retry configuration (for TokenNotGraduated errors in mempool warfare)
+  buy_retry_max_attempts: 3 # Maximum retry attempts for failed buys (0 = no retry)
+  buy_retry_delay_ms: 500 # Delay between retry attempts in milliseconds
+
+# ==============================================================================
+# Gas Oracle Configuration (rapid trading strategy)
+# ==============================================================================
+# Implements base fee + mempool sampling for rapid (≤2s) inclusion on PulseChain
+# Reference: Resources/PulseChain_Gas_Swap_Tuning.md
+gas:
+  # Mempool sampling
+  window_size: 200 # Number of observations in rolling window
+  target_percentile: 0.9 # Target percentile for deriving rapid tier (0.9 = P90)
+
+  # Fee constraints
+  fee_cap_beats: 8000000 # Absolute maximum maxFeePerGas in Beats (8M = safety cap)
+  tip_min_beats: 10000 # Minimum tip (maxPriorityFeePerGas) in Beats (10k minimum)
+  tip_max_factor: 0.4 # Maximum tip as fraction of maxFeePerGas (0.4 = 40%)
+
+  # Base fee headroom factors (protects against base fee growth during mempool wait)
+  headroom_initial_factor: 0.25 # Initial submission headroom (0.25 = 25% of base fee)
+  headroom_escalated_factor: 0.375 # Escalated retry headroom (0.375 = 37.5% of base fee)
+
+  # Escalation policy (for stuck transactions)
+  escalation_max_retries: 2 # Maximum number of escalation retries (up to 2 retries)
+  escalation_tip_multiplier: 1.3 # Tip multiplier for escalation (1.3 = 30% increase)
+
+  # Gas limit ladder (baseline → conservative → ceiling)
+  # Reference: PulseChain single-hop swaps typically use 200-300k gas
+  limit_baseline: 230000 # Baseline gas limit for standard swaps (230k)
+  limit_conservative: 350000 # Conservative gas limit for uncertain swaps (350k)
+  limit_ceiling: 550000 # Maximum gas limit ceiling for complex swaps (550k)
+  limit_retry_bump_pct: 0.10 # Gas limit increase per retry (0.10 = 10%)
+  limit_start_rung: baseline # Starting rung: baseline, conservative, or ceiling
+
+# ==============================================================================
+# Event Bus Configuration
+# ==============================================================================
+event_bus:
+  maxsize: 1000 # Maximum pending events before blocking producers
+
+# ==============================================================================
+# Contract Configuration
+# ==============================================================================
+contract:
+  create_token_selector: "0x2f2f2d56" # createToken(string,string) function selector
